@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MK:// SYSTEM TERMINAL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --pink: #ff2d78;
+    --cyan: #00f5ff;
+    --purple: #b060ff;
+    --yellow: #ffe600;
+    --green: #39ff14;
+    --dim: #4a3060;
+    --bg: #07020f;
+    --surface: #0d0520;
+    --grid: rgba(176, 96, 255, 0.07);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--cyan);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* CRT scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Vignette */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.7) 100%);
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* Grid floor */
+  .grid-bg {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 45vh;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    transform: perspective(600px) rotateX(60deg);
+    transform-origin: bottom center;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .grid-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, transparent 0%, var(--bg) 90%);
+  }
+
+  /* Horizon glow */
+  .horizon {
+    position: fixed;
+    bottom: 42vh;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--pink), var(--purple), var(--pink), transparent);
+    box-shadow: 0 0 30px 8px rgba(255, 45, 120, 0.4), 0 0 60px 20px rgba(176, 96, 255, 0.2);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .terminal-wrap {
+    position: relative;
+    z-index: 10;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 20px 20px 120px;
+    min-height: 100vh;
+  }
+
+  /* Header bar */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border: 1px solid var(--dim);
+    border-bottom: none;
+    background: rgba(13, 5, 32, 0.9);
+    margin-bottom: 0;
+  }
+
+  .header-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--purple);
+    letter-spacing: 0.2em;
+  }
+
+  .header-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .dot-r { background: var(--pink); box-shadow: 0 0 6px var(--pink); }
+  .dot-y { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+  .dot-g { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* Main terminal */
+  .terminal {
+    border: 1px solid var(--dim);
+    background: rgba(7, 2, 15, 0.92);
+    padding: 20px;
+    min-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 40px rgba(176, 96, 255, 0.15), inset 0 0 40px rgba(0,0,0,0.5);
+  }
+
+  .output {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  /* Boot sequence */
+  .boot-line {
+    opacity: 0;
+    animation: fadein 0.1s forwards;
+  }
+
+  @keyframes fadein { to { opacity: 1; } }
+
+  /* Text colors */
+  .c-pink    { color: var(--pink); }
+  .c-cyan    { color: var(--cyan); }
+  .c-purple  { color: var(--purple); }
+  .c-yellow  { color: var(--yellow); }
+  .c-green   { color: var(--green); }
+  .c-dim     { color: #6b5080; }
+  .c-white   { color: #e8e0f0; }
+  .c-red     { color: #ff4444; }
+
+  /* ASCII art */
+  .ascii-art {
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--purple);
+    margin: 8px 0;
+    white-space: pre;
+  }
+
+  .ascii-art.pink { color: var(--pink); }
+  .ascii-art.cyan { color: var(--cyan); }
+
+  /* Prompt */
+  .prompt-line {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-top: 12px;
+    border-top: 1px solid rgba(176, 96, 255, 0.15);
+    padding-top: 12px;
+  }
+
+  .prompt-label {
+    color: var(--green);
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .prompt-at { color: var(--dim); }
+  .prompt-host { color: var(--purple); }
+  .prompt-sep { color: var(--dim); }
+  .prompt-path { color: var(--cyan); }
+  .prompt-sym { color: var(--pink); margin-right: 8px; }
+
+  #cmd-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--cyan);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    flex: 1;
+    caret-color: var(--pink);
+  }
+
+  /* Output blocks */
+  .cmd-echo {
+    color: var(--dim);
+    margin-top: 10px;
+  }
+
+  .section-header {
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    color: var(--pink);
+    border-bottom: 1px solid var(--dim);
+    padding-bottom: 4px;
+    margin: 12px 0 8px;
+  }
+
+  .entry { margin: 6px 0; }
+  .entry-title { color: var(--yellow); }
+  .entry-sub { color: var(--purple); font-size: 12px; }
+  .entry-date { color: var(--dim); font-size: 12px; }
+  .entry-desc { color: #b8a8cc; font-size: 13px; margin-top: 2px; }
+
+  .skill-bar-wrap { margin: 4px 0; }
+  .skill-name { color: var(--cyan); min-width: 220px; display: inline-block; font-size: 13px; }
+  .skill-bar { display: inline-block; }
+  .bar-fill { color: var(--purple); }
+  .bar-empty { color: var(--dim); }
+  .skill-pct { color: var(--dim); font-size: 12px; }
+
+  .tag-list { margin: 4px 0; }
+  .tag {
+    display: inline-block;
+    border: 1px solid var(--dim);
+    color: var(--purple);
+    font-size: 11px;
+    padding: 1px 8px;
+    margin: 2px 3px 2px 0;
+  }
+
+  .tag.cyan { color: var(--cyan); border-color: rgba(0, 245, 255, 0.3); }
+  .tag.pink { color: var(--pink); border-color: rgba(255, 45, 120, 0.3); }
+  .tag.green { color: var(--green); border-color: rgba(57, 255, 20, 0.3); }
+
+  .contact-row { margin: 4px 0; }
+  .contact-key { color: var(--dim); min-width: 120px; display: inline-block; }
+  .contact-val { color: var(--cyan); }
+  .contact-val a { color: var(--cyan); text-decoration: none; }
+  .contact-val a:hover { color: var(--pink); }
+
+  .help-cmd { color: var(--yellow); min-width: 180px; display: inline-block; }
+  .help-desc { color: #8070a0; }
+
+  .error { color: var(--red); }
+  .success { color: var(--green); }
+  .warn { color: var(--yellow); }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--dim);
+    margin: 10px 0;
+    opacity: 0.4;
+  }
+
+  /* Glitch animation on name */
+  @keyframes glitch {
+    0%   { text-shadow: 2px 0 var(--pink), -2px 0 var(--cyan); }
+    20%  { text-shadow: -2px 0 var(--pink), 2px 0 var(--cyan); transform: translate(-1px, 0); }
+    40%  { text-shadow: 2px 0 var(--cyan), -2px 0 var(--purple); transform: translate(1px, 0); }
+    60%  { text-shadow: none; transform: translate(0, 0); }
+    100% { text-shadow: 2px 0 var(--pink), -2px 0 var(--cyan); }
+  }
+
+  .glitch {
+    animation: glitch 4s infinite;
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 22px;
+    color: var(--cyan);
+    letter-spacing: 0.1em;
+  }
+
+  /* Blinking cursor in boot */
+  @keyframes blink { 50% { opacity: 0; } }
+  .cursor { animation: blink 1s step-end infinite; color: var(--pink); }
+
+  /* Typewriter for boot */
+  .typing { overflow: hidden; white-space: nowrap; border-right: 2px solid var(--pink); }
+
+  /* Pulse on prompt */
+  @keyframes pulse-border {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,45,120,0); }
+    50% { box-shadow: 0 0 8px 2px rgba(255,45,120,0.3); }
+  }
+
+  .terminal:focus-within {
+    animation: pulse-border 3s infinite;
+  }
+
+  /* Mobile */
+  @media (max-width: 600px) {
+    .terminal-wrap { padding: 10px 10px 100px; }
+    .terminal { padding: 12px; }
+    .glitch { font-size: 16px; }
+    .ascii-art { font-size: 8px; }
+    .prompt-host, .prompt-path { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="horizon"></div>
+
+<div class="terminal-wrap">
+  <div class="header">
+    <span class="header-title">MK:// NEXUS TERMINAL &nbsp;·&nbsp; v2.4.1 &nbsp;·&nbsp; CLASSIFIED</span>
+    <div class="header-dots">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+    </div>
+  </div>
+
+  <div class="terminal" id="terminal" onclick="focusInput()">
+    <div class="output" id="output"></div>
+
+    <div class="prompt-line">
+      <span class="prompt-label">operator</span>
+      <span class="prompt-at">@</span>
+      <span class="prompt-host">nexus-terminal</span>
+      <span class="prompt-sep">:</span>
+      <span class="prompt-path">~/portfolio</span>
+      <span class="prompt-sym">&nbsp;$&nbsp;</span>
+      <input type="text" id="cmd-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Terminal input" />
+    </div>
+  </div>
+</div>
+
+<script>
+const output = document.getElementById('output');
+const input  = document.getElementById('cmd-input');
+let history = [];
+let histIdx = -1;
+
+// ── DATA ────────────────────────────────────────────────────────────────────
+
+const DATA = {
+  about: {
+    name: 'MATT KEITH',
+    title: 'Technology Services Manager · Security Engineer',
+    location: 'Raleigh, NC',
+    summary: [
+      'Technology Services Manager at the North Carolina Association of County',
+      'Commissioners (NCACC). Full-stack developer, Azure/M365 specialist, and',
+      'certified penetration tester operating at the intersection of IT operations',
+      'and offensive security. Builder of production internal tools, home lab',
+      'systems, and security automation platforms.'
+    ]
+  },
+
+  skills: [
+    { cat: 'OFFENSIVE SECURITY', items: [
+      { name: 'Penetration Testing',        pct: 88 },
+      { name: 'OSINT / Recon',              pct: 90 },
+      { name: 'Network Analysis',           pct: 82 },
+      { name: 'Vulnerability Assessment',   pct: 85 },
+    ]},
+    { cat: 'CLOUD & IDENTITY', items: [
+      { name: 'Azure / Entra ID',           pct: 90 },
+      { name: 'Microsoft 365 / Exchange',   pct: 92 },
+      { name: 'Graph API',                  pct: 80 },
+      { name: 'SharePoint / Power Apps',    pct: 78 },
+    ]},
+    { cat: 'DEVELOPMENT', items: [
+      { name: 'Python / FastAPI',           pct: 88 },
+      { name: 'JavaScript / HTML / CSS',    pct: 85 },
+      { name: 'SQLite / SQL',               pct: 80 },
+      { name: 'GitHub Actions / CI-CD',     pct: 82 },
+    ]},
+    { cat: 'INFRASTRUCTURE', items: [
+      { name: 'Proxmox / Home Lab',         pct: 85 },
+      { name: 'Docker / VPS Ops',           pct: 80 },
+      { name: 'Barracuda / Filtering',      pct: 78 },
+      { name: 'Windows Server / NSSM',      pct: 83 },
+    ]},
+  ],
+
+  projects: [
+    { name: 'NCACC Contacts Portal',   tech: ['Python','FastAPI','Azure','Graph API','SQLite'],  status: 'LIVE',    desc: 'Production internal CRM with Entra ID auth, Teams webhooks, analytics middleware, and choropleth map. Deployed to Azure VM.' },
+    { name: 'Phishing Sim Platform',   tech: ['FastAPI','SQLite','Graph API','GitHub Actions'],  status: 'LIVE',    desc: 'Full security awareness platform: 5 phishing templates, landing pages, Teams alerts, CI/CD pipeline. Azure App Service.' },
+    { name: 'JARVIS Situation Monitor',tech: ['FastAPI','RSS','SSE','Cloudflare Tunnel'],         status: 'LIVE',    desc: 'Real-time world events dashboard with Chad/Chud voting, admin moderation, niche category RSS injection.' },
+    { name: 'Controller Office',       tech: ['Python','AutoHotkey','Ollama','iCUE'],            status: 'LIVE',    desc: 'Windows productivity app using a Scuf Envision Pro controller — radial vaporwave menu, AI text input, context-aware profiles.' },
+    { name: 'STIXZB Stream Overlay',   tech: ['FastAPI','SSE','AutoHotkey','OBS'],               status: 'LIVE',    desc: 'Real-time Fortnite overlay for top-500 streamer Bryan. Rank badge arcs, elim/win counters, hardware hotkey binds.' },
+    { name: 'Intrusion Detection Sys', tech: ['Python','Scapy','ML','Flask'],                    status: 'BUILT',   desc: 'Python-based IDS with pattern detection, brute-force analysis, and anomaly classification with real-time alerting.' },
+    { name: 'Threat Intel Aggregator', tech: ['Python','APIs','Threat Intel'],                   status: 'BUILT',   desc: 'Pulls IoCs from multiple public threat sources, correlates entities, fires alerts on matches.' },
+    { name: 'Recon Report Generator',  tech: ['Python','Recon APIs','Reporting'],                status: 'BUILT',   desc: 'Automation pipeline that enumerates targets and outputs formatted vulnerability reports.' },
+    { name: 'Digital Forensics Sim',   tech: ['Python','DFIR','Forensics'],                      status: 'BUILT',   desc: 'Full investigation simulator covering evidence collection, timeline reconstruction, and incident chain-of-custody.' },
+    { name: 'VoidTerm CTF Toolkit',    tech: ['Python','JavaScript','NetSec','CTF'],             status: 'BUILT',   desc: 'Hybrid utility for CTF challenges. LLM backend + client-side tooling for cipher analysis, JWT, and SSL inspection.' },
+    { name: 'SynthStrike',             tech: ['JavaScript','Web Audio API','Vanilla JS'],        status: 'BUILT',   desc: 'Synthwave-browser rhythm game with chiptune synthesis, scrolling perspective grid, and combo mechanics.' },
+    { name: 'NeonCast',                tech: ['Python','LVGL','REST API','SPI'],                  status: 'BUILT',   desc: 'Real-time broadcast ticker with news/weather/API feeds. LVGL display dashboard, BLE dashboard, and ML anomaly detection.' },
+    { name: 'Mini-SIEM',               tech: ['Python','Log Analysis','Dashboard'],              status: 'BUILT',   desc: 'Lightweight SIEM with Python ingestion, log normalization, alert rules, and analyst visibility dashboard.' },
+    { name: 'FNLog',                   tech: ['Python','Zero-Build API','Overlay'],              status: 'BUILT',   desc: 'Fortnite Zero-Build tracker with dashboard, stat placement ads with pre-built Fortnite API integration, ZKV storage.' },
+  ],
+
+  experience: [
+    { title: 'Technology Services Manager', org: 'NC Association of County Commissioners', dates: 'Current', desc: 'Primary helpdesk, de facto internal developer. Azure/M365 admin, SharePoint architect, security platform builder.' },
+    { title: 'Customer Success Manager',    org: 'Managed Service Provider',               dates: 'Prior',   desc: 'Client-facing technical lead. Managed onboarding, escalations, and technical relationship management across MSP accounts.' },
+  ],
+
+  certs: [
+    { name: 'AAS — Cybersecurity',             org: 'Community College',  year: '2024', badge: 'DEGREE' },
+    { name: 'Certificate — Penetration Testing',org: 'Community College', year: '2024', badge: 'CERT'   },
+  ],
+
+  contact: {
+    github:   'github.com/nexusfang-tech',
+    site:     'nexusfang-tech.github.io',
+    location: 'Raleigh, NC',
+    status:   'Open to security / systems engineering opportunities',
+  },
+
+  easter: {
+    sudo:        '[ PERMISSION DENIED ] Nice try, operator.',
+    hack:        '[ ALERT ] Unauthorized intrusion attempt logged. Just kidding. You\'re already in.',
+    ls:          'nexusfang-tech.github.io/  phishing-sim/  contacts-portal/  jarvis/  controller-office/',
+    cd:          '[ ERROR ] You\'re already at the root of the matrix.',
+    cat:         'cat: no file specified. Try: cat /etc/operator_dossier',
+    'cat /etc/operator_dossier': 'NAME: Keith, Matthew\nCLEARANCE: Operator\nSPECIALTY: Azure · Pentest · Full-Stack\nTHREAT LEVEL: Hireable',
+    pwd:         '/home/operator/nexus-terminal/portfolio',
+    uname:       'NexusOS v2.4.1 (Synthwave Edition) x86_64 — OPERATIONAL',
+    date:        new Date().toString(),
+    uptime:      'System uptime: ' + Math.floor(Math.random()*9999) + ' hours — running since boot.',
+    vim:         '[ ERROR ] vim not found. (Actually it\'s just forbidden on this terminal. Skill issue.)',
+    nano:        '[ ERROR ] nano not found. We use real editors here.',
+    ping:        'PING nexusfang-tech.github.io: 0ms (you\'re already inside the system)',
+    whoami:      'You are: Potential Collaborator. Clearance: Pending. Recommendation: type `help`.',
+    matrix:      null, // triggers special animation
+    nmap:        'Starting Nmap 7.94 — Host: localhost (127.0.0.1) — Ports: 22/tcp open ssh, 80/tcp open http, 443/tcp open https, 8000/tcp open operator-api',
+    htop:        '[ REDACTED ] System resource data is classified. Operator clearance only.',
+    clear:       null,
+    cls:         null,
+    exit:        '[ SYSTEM ] Connection cannot be terminated. You\'re in too deep.',
+    rm:          '[ BLOCKED ] Destructive operations are not permitted on this terminal, operator.',
+    'rm -rf /':  '[ CRITICAL ALERT ] Nice try. This terminal has feelings. And backups.',
+    ifconfig:    'eth0: inet 10.0.0.1  netmask 255.255.255.0\nlo:   inet 127.0.0.1  netmask 255.0.0.0\nnexus0: inet [CLASSIFIED]',
+    help:        null,
+  }
+};
+
+// ── RENDER HELPERS ───────────────────────────────────────────────────────────
+
+function line(html, cls = '') {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.innerHTML = html;
+  output.appendChild(d);
+}
+
+function blank() { line('&nbsp;'); }
+
+function sectionHeader(txt) {
+  line(`<div class="section-header">// ${txt}</div>`);
+}
+
+function renderBar(pct) {
+  const filled = Math.round(pct / 5);
+  const empty  = 20 - filled;
+  return `<span class="bar-fill">${'█'.repeat(filled)}</span><span class="bar-empty">${'░'.repeat(empty)}</span>`;
+}
+
+function tags(arr, cls = '') {
+  return arr.map(t => `<span class="tag ${cls}">${t}</span>`).join('');
+}
+
+function scrollBottom() {
+  const el = document.getElementById('terminal');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── BOOT SEQUENCE ────────────────────────────────────────────────────────────
+
+const bootLines = [
+  { html: '<span class="c-dim">[ BIOS ] Scanning memory banks............. OK</span>',   delay: 100 },
+  { html: '<span class="c-dim">[ BOOT ] Loading NexusOS kernel............. OK</span>',  delay: 200 },
+  { html: '<span class="c-dim">[ AUTH ] Verifying operator credentials..... OK</span>',  delay: 350 },
+  { html: '<span class="c-dim">[ NET  ] Establishing secure tunnel......... OK</span>',  delay: 500 },
+  { html: '<span class="c-dim">[ INIT ] Mounting portfolio filesystem...... OK</span>',  delay: 650 },
+  { html: '<span class="c-dim">[ SEC  ] AES-256 encryption layer active.... OK</span>', delay: 800 },
+  { html: '',                                                                               delay: 950 },
+  { html: ascii_banner(),                                                                   delay: 1000 },
+  { html: '',                                                                               delay: 1050 },
+  { html: `<span class="c-purple">  NEXUS TERMINAL &nbsp;·&nbsp; OPERATOR PORTFOLIO SYSTEM &nbsp;·&nbsp; CLASSIFIED</span>`, delay: 1100 },
+  { html: `<span class="c-dim">  ──────────────────────────────────────────────────────</span>`, delay: 1150 },
+  { html: `<span class="c-cyan">  Operative  :</span> <span class="c-white">Matt Keith — Technology Services Manager · Security Engineer</span>`, delay: 1200 },
+  { html: `<span class="c-cyan">  Location   :</span> <span class="c-white">Raleigh, NC  //  36.1627° N, 78.6633° W</span>`, delay: 1250 },
+  { html: `<span class="c-cyan">  Clearance  :</span> <span class="c-green">OPERATOR — FULL ACCESS GRANTED</span>`, delay: 1300 },
+  { html: `<span class="c-dim">  ──────────────────────────────────────────────────────</span>`, delay: 1350 },
+  { html: '',                                                                               delay: 1400 },
+  { html: `<span class="c-purple">  Type <span class="c-yellow">help</span> to list available commands. <span class="c-dim">Unrecognized inputs are logged.</span></span>`, delay: 1450 },
+  { html: '',                                                                               delay: 1500 },
+];
+
+function ascii_banner() {
+  const matt  = 'color:#00f5ff;';
+  const keith = 'color:#ff2d78;';
+  return `<pre class="ascii-art" style="font-size:10px;line-height:1.15;">` +
+`<span style="${matt}">  ███╗   ███╗ █████╗ ████████╗████████╗</span>    <span style="${keith}">██╗  ██╗███████╗██╗████████╗██╗  ██╗</span>
+<span style="${matt}">  ████╗ ████║██╔══██╗╚══██╔══╝╚══██╔══╝</span>    <span style="${keith}">██║ ██╔╝██╔════╝██║╚══██╔══╝██║  ██║</span>
+<span style="${matt}">  ██╔████╔██║███████║   ██║      ██║   </span>    <span style="${keith}">█████╔╝ █████╗  ██║   ██║   ███████║</span>
+<span style="${matt}">  ██║╚██╔╝██║██╔══██║   ██║      ██║   </span>    <span style="${keith}">██╔═██╗ ██╔══╝  ██║   ██║   ██╔══██║</span>
+<span style="${matt}">  ██║ ╚═╝ ██║██║  ██║   ██║      ██║   </span>    <span style="${keith}">██║  ██╗███████╗██║   ██║   ██║  ██║</span>
+<span style="${matt}">  ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝      ╚═╝   </span>    <span style="${keith}">╚═╝  ╚═╝╚══════╝╚═╝   ╚═╝   ╚═╝  ╚═╝</span></pre>`;
+}
+
+function runBoot() {
+  bootLines.forEach(({ html, delay }) => {
+    setTimeout(() => {
+      if (html === '') { blank(); return; }
+      const d = document.createElement('div');
+      d.innerHTML = html;
+      output.appendChild(d);
+      scrollBottom();
+    }, delay);
+  });
+  setTimeout(() => { input.focus(); }, 1600);
+}
+
+// ── COMMAND HANDLERS ─────────────────────────────────────────────────────────
+
+function handleCommand(raw) {
+  const cmd = raw.trim().toLowerCase();
+  const rawCmd = raw.trim();
+
+  line(`<span class="c-green">operator@nexus-terminal:~/portfolio $</span> <span class="c-cyan">${rawCmd}</span>`, 'cmd-echo');
+  blank();
+
+  if (!cmd) { scrollBottom(); return; }
+
+  // History
+  history.unshift(raw);
+  if (history.length > 50) history.pop();
+  histIdx = -1;
+
+  // Route
+  if (cmd === 'clear' || cmd === 'cls') { output.innerHTML = ''; return; }
+  if (cmd === 'help')     { cmdHelp(); }
+  else if (cmd === 'whoami' || cmd === 'about') { cmdAbout(); }
+  else if (cmd === 'skills') { cmdSkills(); }
+  else if (cmd === 'projects') { cmdProjects(); }
+  else if (cmd === 'experience') { cmdExperience(); }
+  else if (cmd === 'contact') { cmdContact(); }
+  else if (cmd === 'certifications' || cmd === 'certs') { cmdCerts(); }
+  else if (cmd === 'matrix') { cmdMatrix(); }
+  else if (DATA.easter[rawCmd] !== undefined) { cmdEaster(rawCmd); }
+  else if (DATA.easter[cmd] !== undefined) { cmdEaster(cmd); }
+  else { cmdNotFound(rawCmd); }
+
+  scrollBottom();
+}
+
+function cmdHelp() {
+  sectionHeader('AVAILABLE COMMANDS');
+  const cmds = [
+    ['whoami',         'Operative dossier and summary'],
+    ['skills',         'Technical capability assessment'],
+    ['projects',       'Deployed and archived operations'],
+    ['experience',     'Field assignment history'],
+    ['certifications', 'Credentials and formal training'],
+    ['contact',        'Establish secure comms channel'],
+    ['clear',          'Purge terminal buffer'],
+  ];
+  cmds.forEach(([c, d]) => {
+    line(`  <span class="help-cmd">${c}</span><span class="help-desc">${d}</span>`);
+  });
+  blank();
+  line(`<span class="c-dim">  // Other commands may be recognized. This system logs all inputs.</span>`);
+}
+
+function cmdAbout() {
+  sectionHeader('OPERATIVE DOSSIER');
+  line(`  <span class="glitch">${DATA.about.name}</span>`);
+  blank();
+  line(`  <span class="c-purple">${DATA.about.title}</span>`);
+  line(`  <span class="c-dim">${DATA.about.location}</span>`);
+  blank();
+  DATA.about.summary.forEach(l => line(`  <span class="c-white">${l}</span>`));
+}
+
+function cmdSkills() {
+  sectionHeader('CAPABILITY MATRIX');
+  DATA.skills.forEach(cat => {
+    blank();
+    line(`  <span class="c-pink">[ ${cat.cat} ]</span>`);
+    cat.items.forEach(s => {
+      line(`  <span class="skill-name">${s.name}</span> ${renderBar(s.pct)} <span class="skill-pct"> ${s.pct}%</span>`);
+    });
+  });
+}
+
+function cmdProjects() {
+  sectionHeader('OPERATION LOG');
+  DATA.projects.forEach(p => {
+    blank();
+    const statusCls = p.status === 'LIVE' ? 'c-green' : 'c-yellow';
+    line(`  <span class="entry-title">${p.name}</span> <span class="${statusCls}" style="font-size:11px; border:1px solid currentColor; padding:1px 6px;">${p.status}</span>`);
+    line(`  ${tags(p.tech, 'cyan')}`);
+    line(`  <span class="entry-desc">${p.desc}</span>`);
+  });
+}
+
+function cmdExperience() {
+  sectionHeader('FIELD ASSIGNMENTS');
+  DATA.experience.forEach(e => {
+    blank();
+    line(`  <span class="entry-title">${e.title}</span> <span class="entry-date">// ${e.dates}</span>`);
+    line(`  <span class="entry-sub">${e.org}</span>`);
+    line(`  <span class="entry-desc">${e.desc}</span>`);
+  });
+}
+
+function cmdCerts() {
+  sectionHeader('CREDENTIALS & CLEARANCES');
+  blank();
+  DATA.certs.forEach(c => {
+    line(`  <span class="c-pink">[ ${c.badge} ]</span> <span class="entry-title">${c.name}</span>`);
+    line(`         <span class="c-dim">${c.org} · ${c.year}</span>`);
+    blank();
+  });
+  line(`  <span class="c-dim">// Continuously expanding. CTF participation ongoing.</span>`);
+}
+
+function cmdContact() {
+  sectionHeader('ESTABLISHING SECURE CHANNEL');
+  blank();
+  line(`  <span class="c-dim">STATUS:</span> <span class="c-green">● OPEN TO OPPORTUNITIES</span>`);
+  blank();
+  Object.entries(DATA.contact).forEach(([k, v]) => {
+    const isLink = v.startsWith('github') || v.startsWith('nexus');
+    const val = isLink ? `<a href="https://${v}" target="_blank" class="contact-val">${v}</a>` : `<span class="contact-val">${v}</span>`;
+    line(`  <span class="contact-key">${k.toUpperCase().padEnd(12)}</span>${val}`);
+  });
+  blank();
+  line(`  <span class="c-dim">// Encrypting transmission... Secure handshake ready.</span>`);
+}
+
+function cmdEaster(cmd) {
+  const val = DATA.easter[cmd];
+  if (val === null) return; // handled separately
+  if (cmd === 'date') {
+    line(`  <span class="c-cyan">${new Date().toString()}</span>`);
+  } else if (cmd === 'uptime') {
+    line(`  <span class="c-cyan">${val}</span>`);
+  } else {
+    val.split('\n').forEach(l => line(`  <span class="c-yellow">${l}</span>`));
+  }
+}
+
+function cmdMatrix() {
+  line(`  <span class="c-green">// INITIATING MATRIX PROTOCOL...</span>`);
+  const chars = '日ﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾃｦｲｸｺｿﾁﾄﾉﾌﾔﾖﾙﾚﾛﾝ0123456789ABCDEF<>{}[]|/\\';
+  let count = 0;
+  const iv = setInterval(() => {
+    let row = '  ';
+    for (let i = 0; i < 60; i++) row += `<span style="color:hsl(${Math.random()*60+100},100%,${Math.random()*40+30}%)">${chars[Math.floor(Math.random()*chars.length)]}</span>`;
+    line(row);
+    scrollBottom();
+    count++;
+    if (count > 20) {
+      clearInterval(iv);
+      blank();
+      line(`  <span class="c-pink">// MATRIX PROTOCOL DISENGAGED. Welcome back, operator.</span>`);
+      scrollBottom();
+    }
+  }, 60);
+}
+
+function cmdNotFound(cmd) {
+  line(`  <span class="error">bash: ${cmd}: command not found</span>`);
+  line(`  <span class="c-dim">// Input logged. Type <span class="c-yellow">help</span> for authorized commands.</span>`);
+}
+
+// ── INPUT HANDLING ────────────────────────────────────────────────────────────
+
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const val = input.value;
+    input.value = '';
+    handleCommand(val);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (histIdx < history.length - 1) { histIdx++; input.value = history[histIdx]; }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (histIdx > 0) { histIdx--; input.value = history[histIdx]; }
+    else { histIdx = -1; input.value = ''; }
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    const partial = input.value.toLowerCase();
+    const cmds = ['whoami','about','skills','projects','experience','certifications','certs','contact','help','clear','cls'];
+    const match = cmds.find(c => c.startsWith(partial));
+    if (match) input.value = match;
+  }
+});
+
+function focusInput() { input.focus(); }
+
+// Boot!
+runBoot();
+</script>
+</body>
+</html>
